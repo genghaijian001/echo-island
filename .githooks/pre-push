@@ -1,0 +1,2 @@
+#!/usr/bin/env sh
+node scripts/cleanup-regenerable-cache.cjs --pre-push

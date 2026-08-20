@@ -24,3 +24,13 @@ GitHub Actions builds on `main` and publishes Release assets for `v*` tags. The 
 ## Local-only tooling state
 
 `.npmrc` and `scripts/with-local-cache.ps1` redirect only commands launched from this repository. They do not write global npm/Cargo configuration or system environment variables.
+
+## Regenerable cache cleanup
+
+`scripts/cleanup-regenerable-cache.cjs` owns project-local cache cleanup. It refuses to delete outside the repository root.
+
+- Light cleanup removes `.cache`, TypeScript build info, and Rust incremental directories.
+- Deep cleanup additionally removes `dist` and `src-tauri/target`.
+- Git pre-push uses deep cleanup so ignored build caches do not accumulate before upload.
+- GitHub Actions runs light cleanup before cloud packaging and deep cleanup after artifacts/releases are uploaded.
+- Cleanup intentionally does not remove `node_modules`, source files, downloaded cloud artifacts, or release executables.

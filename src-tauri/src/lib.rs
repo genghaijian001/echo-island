@@ -91,6 +91,8 @@ fn run_monitor_loop(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(MonitorState::default())
         .setup(|app| {
             let window_config = app

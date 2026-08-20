@@ -41,9 +41,13 @@ jobs:
         run: npm ci
 
       - name: Build Windows app
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: npm run tauri build
 
       - name: Upload Windows artifacts
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         uses: actions/upload-artifact@v4
         with:
           name: EchoIsland-Windows
@@ -53,18 +57,21 @@ jobs:
             src-tauri/target/release/bundle/**/*.exe
             src-tauri/target/release/bundle/**/*.msi
 
-      - name: Publish GitHub release
+      - name: Build and publish signed GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
+        uses: tauri-apps/tauri-action@v1
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create $env:GITHUB_REF_NAME `
-            --title "EchoIsland $env:GITHUB_REF_NAME" `
-            --notes "EchoIsland Windows cloud build. Download the direct executable or installer from the assets below." `
-            src-tauri/target/release/*.exe `
-            src-tauri/target/release/bundle/nsis/*.exe `
-            src-tauri/target/release/bundle/msi/*.msi
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "EchoIsland ${{ github.ref_name }}"
+          releaseBody: "EchoIsland Windows 稳定版。应用内可安全检查、下载并安装此更新。"
+          releaseDraft: false
+          prerelease: false
+          generateReleaseNotes: true
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
 
       - name: Clean runner cache after packaging
         if: always()

@@ -1,50 +1,19 @@
-import { DownloadIcon, ShieldCheckIcon } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { openExternalUrl } from "@/services/desktop"
-import type { UpdateCheckState } from "@/features/updates/use-update-check"
+import { DownloadIcon, LoaderCircleIcon, ShieldAlertIcon } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import type { AppUpdateState } from "@/features/updates/use-update-check"
 
-interface UpdateNoticeProps {
-  state: UpdateCheckState
-}
-
-export function UpdateNotice({ state }: UpdateNoticeProps) {
-  if (state.status === "checking") {
-    return (
-      <div className="update-notice" data-status="checking">
-        <ShieldCheckIcon aria-hidden="true" />
-        <span>正在检查更新</span>
-      </div>
-    )
+export function UpdateNotice({ state }: { state: AppUpdateState }) {
+  if (state.phase === "available") {
+    return <Badge variant="secondary"><DownloadIcon data-icon="inline-start" />发现 {state.latestVersion}</Badge>
   }
 
-  if (state.status === "available") {
-    return (
-      <div className="update-notice" data-status="available">
-        <DownloadIcon aria-hidden="true" />
-        <div className="min-w-0">
-          <p className="truncate">发现 EchoIsland {state.latestVersion}</p>
-          <p className="truncate">当前版本 {state.currentVersion}</p>
-        </div>
-        <Button variant="secondary" size="sm" onClick={() => void openExternalUrl(state.releaseUrl)}>
-          打开
-        </Button>
-      </div>
-    )
+  if (state.phase === "checking" || state.phase === "downloading" || state.phase === "installing") {
+    return <Badge variant="outline"><LoaderCircleIcon data-icon="inline-start" />{state.phase === "checking" ? "检查更新" : "正在更新"}</Badge>
   }
 
-  if (state.status === "unavailable") {
-    return (
-      <div className="update-notice" data-status="muted">
-        <ShieldCheckIcon aria-hidden="true" />
-        <span>{state.reason}</span>
-      </div>
-    )
+  if (state.phase === "error") {
+    return <Badge variant="destructive"><ShieldAlertIcon data-icon="inline-start" />更新异常</Badge>
   }
 
-  return (
-    <div className="update-notice" data-status="current">
-      <ShieldCheckIcon aria-hidden="true" />
-      <span>已是最新版本 {state.currentVersion}</span>
-    </div>
-  )
+  return null
 }

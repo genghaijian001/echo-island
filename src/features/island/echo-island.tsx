@@ -1,17 +1,16 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
 import {
   AudioLinesIcon,
   CheckCircle2Icon,
   CircleStopIcon,
   CloudIcon,
-  DownloadIcon,
   HeadphonesIcon,
   LoaderCircleIcon,
   PinIcon,
   PinOffIcon,
-  PlayIcon,
   RadioIcon,
   SearchIcon,
+  SettingsIcon,
   XIcon,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -20,13 +19,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { AudioWaveform } from "@/features/monitoring/audio-waveform"
 import { useMonitoring } from "@/features/monitoring/use-monitoring"
 import { PlatformPlayer } from "@/features/playback/platform-player"
+import { SettingsDialog } from "@/features/settings/settings-dialog"
 import { UpdateNotice } from "@/features/updates/update-notice"
 import { useUpdateCheck } from "@/features/updates/use-update-check"
 import {
   beginWindowDrag,
   closeWindow,
   isWindowPinned,
-  openExternalUrl,
   resizeIsland,
   setWindowPinned,
 } from "@/services/desktop"
@@ -42,30 +41,12 @@ const phaseLabel = {
 } as const
 
 const phaseCopy: Record<MonitorPhase, { title: string; subtitle: string }> = {
-  idle: {
-    title: "点击开始识别电脑声音",
-    subtitle: "只监听系统输出，不访问麦克风",
-  },
-  starting: {
-    title: "正在连接播放设备",
-    subtitle: "准备捕获你耳机里听到的声音",
-  },
-  listening: {
-    title: "正在听电脑声音",
-    subtitle: "保持播放，EchoIsland 会自动匹配",
-  },
-  recognizing: {
-    title: "正在匹配音乐",
-    subtitle: "从当前声音片段里提取指纹",
-  },
-  matched: {
-    title: "识别到了",
-    subtitle: "已找到当前播放的音乐",
-  },
-  error: {
-    title: "监听遇到问题",
-    subtitle: "检查播放设备或稍后重试",
-  },
+  idle: { title: "单击圆球开始识别", subtitle: "鼠标移开后自动收缩" },
+  starting: { title: "正在连接播放设备", subtitle: "只捕获电脑正在播放的声音" },
+  listening: { title: "正在持续监听", subtitle: "单击圆球即可停止" },
+  recognizing: { title: "正在匹配音乐", subtitle: "保持播放，正在分析声音指纹" },
+  matched: { title: "识别到了", subtitle: "已找到当前播放的音乐" },
+  error: { title: "监听遇到问题", subtitle: "检查播放设备后再次单击圆球" },
 }
 
 function getPhaseIcon(phase: MonitorPhase) {
@@ -85,56 +66,7 @@ function getIslandTone(snapshot: MonitorSnapshot) {
   return "idle"
 }
 
-function IslandIdentity({ snapshot }: { snapshot: MonitorSnapshot }) {
-  const PhaseIcon = getPhaseIcon(snapshot.phase)
-  const copy = phaseCopy[snapshot.phase]
-
-  return (
-    <div className="island-identity">
-      <div className="signal-orb" data-active={snapshot.running} data-phase={snapshot.phase}>
-        <PhaseIcon aria-hidden="true" />
-      </div>
-      <div className="min-w-0 leading-tight">
-        <p className="truncate text-sm font-semibold tracking-normal">EchoIsland</p>
-        <p className="truncate text-xs text-muted-foreground">{snapshot.message || copy.title}</p>
-      </div>
-    </div>
-  )
-}
-
-function CompactAction({
-  snapshot,
-  onStart,
-  onStop,
-}: {
-  snapshot: MonitorSnapshot
-  onStart: () => void
-  onStop: () => void
-}) {
-  if (snapshot.running || snapshot.phase === "starting") {
-    return (
-      <Button className="island-mini-stop" variant="secondary" size="sm" onClick={onStop}>
-        <CircleStopIcon data-icon="inline-start" />
-        停止
-      </Button>
-    )
-  }
-
-  return (
-    <Button className="island-start" variant="secondary" size="sm" onClick={onStart}>
-      <PlayIcon data-icon="inline-start" />
-      开始识别
-    </Button>
-  )
-}
-
-function StatusScene({
-  snapshot,
-  onStop,
-}: {
-  snapshot: MonitorSnapshot
-  onStop: () => void
-}) {
+function StatusScene({ snapshot }: { snapshot: MonitorSnapshot }) {
   const copy = phaseCopy[snapshot.phase]
   const scanning = snapshot.phase === "recognizing" || snapshot.phase === "starting"
 
@@ -145,21 +77,12 @@ function StatusScene({
         <p className="status-title">{copy.title}</p>
         <p className="status-subtitle">{copy.subtitle}</p>
       </div>
-      <Button variant="destructive" size="sm" onClick={onStop}>
-        <CircleStopIcon data-icon="inline-start" />
-        停止
-      </Button>
+      <div className="status-live-dot" data-active={snapshot.running} aria-hidden="true" />
     </div>
   )
 }
 
-function TrackSummary({
-  track,
-  onStop,
-}: {
-  track: RecognizedTrack
-  onStop: () => void
-}) {
+function TrackSummary({ track }: { track: RecognizedTrack }) {
   return (
     <div className="track-grid">
       <div className="album-art">
@@ -169,52 +92,109 @@ function TrackSummary({
         <p className="truncate text-base font-semibold">{track.title}</p>
         <p className="truncate text-sm text-muted-foreground">{track.artist}</p>
       </div>
-      <Button variant="destructive" size="icon" onClick={onStop} aria-label="停止持续监听">
-        <CircleStopIcon />
-      </Button>
+      <Badge variant="secondary">正在播放</Badge>
     </div>
   )
 }
 
 export function EchoIsland() {
   const { snapshot, level, start, stop } = useMonitoring()
-  const updateState = useUpdateCheck()
+  const updater = useUpdateCheck()
+  const [hovered, setHovered] = useState(false)
+  const [attentionOpen, setAttentionOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [pinned, setPinned] = useState(true)
   const [pinPending, setPinPending] = useState(false)
-  const [detailsOpen, setDetailsOpen] = useState(false)
+  const collapseTimer = useRef<number | null>(null)
+  const attentionTimer = useRef<number | null>(null)
   const active = snapshot.running || snapshot.phase === "starting" || snapshot.phase === "error" || Boolean(snapshot.currentTrack)
-  const expanded = active && detailsOpen
+  const revealed = hovered || attentionOpen || settingsOpen
+  const showStage = revealed && active
   const hasPlayer = Boolean(snapshot.currentTrack)
-  const hasUpdate = updateState.status === "available"
   const tone = getIslandTone(snapshot)
+  const PhaseIcon = getPhaseIcon(snapshot.phase)
+  const copy = phaseCopy[snapshot.phase]
 
   useEffect(() => {
-    const size = !expanded ? (active || hasUpdate ? [430, 82] : [392, 80]) : hasPlayer ? [540, 626] : [540, 338]
+    const size = settingsOpen
+      ? [620, 720]
+      : !revealed
+        ? [72, 72]
+        : hasPlayer
+          ? [540, 626]
+          : active
+            ? [500, 338]
+            : [418, 80]
     void resizeIsland(size[0], size[1])
-  }, [active, expanded, hasPlayer, hasUpdate])
+  }, [active, hasPlayer, revealed, settingsOpen])
 
   useEffect(() => {
     void isWindowPinned().then(setPinned)
   }, [])
 
   useEffect(() => {
-    if (snapshot.running || snapshot.phase === "starting" || snapshot.phase === "error" || snapshot.currentTrack) {
-      setDetailsOpen(true)
+    if (!snapshot.currentTrack) return
+    setAttentionOpen(true)
+    if (attentionTimer.current !== null) window.clearTimeout(attentionTimer.current)
+    attentionTimer.current = window.setTimeout(() => setAttentionOpen(false), 6500)
+    return () => {
+      if (attentionTimer.current !== null) window.clearTimeout(attentionTimer.current)
     }
-  }, [snapshot.currentTrack, snapshot.phase, snapshot.running])
+  }, [snapshot.currentTrack?.id])
 
-  async function handleStart() {
-    setDetailsOpen(true)
-    await start()
+  function revealIsland() {
+    if (collapseTimer.current !== null) window.clearTimeout(collapseTimer.current)
+    setHovered(true)
   }
 
-  async function handleStop() {
-    await stop()
-    setDetailsOpen(false)
+  function scheduleCollapse() {
+    if (settingsOpen) return
+    collapseTimer.current = window.setTimeout(() => setHovered(false), 260)
   }
 
-  async function togglePinned() {
-    const nextPinned = !pinned
+  async function toggleMonitoring() {
+    if (snapshot.running || snapshot.phase === "starting") {
+      await stop()
+      setAttentionOpen(false)
+    } else {
+      setAttentionOpen(true)
+      if (attentionTimer.current !== null) window.clearTimeout(attentionTimer.current)
+      attentionTimer.current = window.setTimeout(() => setAttentionOpen(false), 2200)
+      await start()
+    }
+  }
+
+  function handleOrbPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return
+    event.preventDefault()
+    const startX = event.clientX
+    const startY = event.clientY
+    let dragged = false
+
+    function cleanup() {
+      window.removeEventListener("pointermove", handleMove)
+      window.removeEventListener("pointerup", handleUp)
+      window.removeEventListener("pointercancel", cleanup)
+    }
+
+    function handleMove(moveEvent: PointerEvent) {
+      if (Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) < 5) return
+      dragged = true
+      cleanup()
+      void beginWindowDrag()
+    }
+
+    function handleUp() {
+      cleanup()
+      if (!dragged) void toggleMonitoring()
+    }
+
+    window.addEventListener("pointermove", handleMove)
+    window.addEventListener("pointerup", handleUp)
+    window.addEventListener("pointercancel", cleanup)
+  }
+
+  async function togglePinned(nextPinned = !pinned) {
     setPinPending(true)
     try {
       await setWindowPinned(nextPinned)
@@ -225,42 +205,67 @@ export function EchoIsland() {
   }
 
   return (
-    <section className="island-shell" data-expanded={expanded} data-tone={tone} aria-label="EchoIsland 音乐识别">
+    <section
+      className="island-shell"
+      data-revealed={revealed}
+      data-stage={showStage}
+      data-tone={tone}
+      aria-label="EchoIsland 音乐识别悬浮球"
+      onMouseEnter={revealIsland}
+      onMouseLeave={scheduleCollapse}
+    >
       <header
-        className="island-drag-region"
+        className="island-bar"
         onMouseDown={(event) => {
-          if ((event.target as HTMLElement).closest("button")) return
+          if ((event.target as HTMLElement).closest("button, [role='button']")) return
           void beginWindowDrag()
         }}
-        onClick={(event) => {
-          if ((event.target as HTMLElement).closest("button")) return
-          if (active) setDetailsOpen((open) => !open)
-        }}
       >
-        <IslandIdentity snapshot={snapshot} />
+        <div
+          className="floating-orb"
+          role="button"
+          tabIndex={0}
+          aria-label={snapshot.running ? "停止持续识别" : "开始持续识别"}
+          aria-pressed={snapshot.running}
+          data-active={snapshot.running}
+          data-phase={snapshot.phase}
+          onPointerDown={handleOrbPointerDown}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault()
+              void toggleMonitoring()
+            }
+          }}
+        >
+          <span className="orb-energy-ring" aria-hidden="true" />
+          <PhaseIcon aria-hidden="true" />
+          {snapshot.running ? <span className="orb-running-dot" aria-hidden="true" /> : null}
+        </div>
 
-        {!expanded ? <CompactAction snapshot={snapshot} onStart={() => void handleStart()} onStop={() => void handleStop()} /> : null}
+        <div className="island-copy">
+          <p className="truncate text-sm font-semibold">{snapshot.currentTrack?.title ?? "EchoIsland"}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {snapshot.currentTrack?.artist ?? snapshot.message ?? copy.title}
+          </p>
+        </div>
 
         <div className="island-controls">
-          {expanded ? <Badge variant={snapshot.phase === "error" ? "destructive" : "secondary"}>{phaseLabel[snapshot.phase]}</Badge> : null}
-          {hasUpdate ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    className="island-update-button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={`发现 EchoIsland ${updateState.latestVersion} 更新`}
-                    onClick={() => void openExternalUrl(updateState.releaseUrl)}
-                  />
-                }
-              >
-                <DownloadIcon />
-              </TooltipTrigger>
-              <TooltipContent>发现更新</TooltipContent>
-            </Tooltip>
-          ) : null}
+          <UpdateNotice state={updater.state} />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="打开设置"
+                  onClick={() => setSettingsOpen(true)}
+                />
+              }
+            >
+              <SettingsIcon />
+            </TooltipTrigger>
+            <TooltipContent>设置</TooltipContent>
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger
               render={
@@ -289,25 +294,29 @@ export function EchoIsland() {
         </div>
       </header>
 
-      {expanded ? (
+      {showStage ? (
         <div className="island-stage">
           <AudioWaveform level={level} active={snapshot.running} />
-
-          {snapshot.currentTrack ? (
-            <TrackSummary track={snapshot.currentTrack} onStop={() => void handleStop()} />
-          ) : (
-            <StatusScene snapshot={snapshot} onStop={() => void handleStop()} />
-          )}
-
+          {snapshot.currentTrack ? <TrackSummary track={snapshot.currentTrack} /> : <StatusScene snapshot={snapshot} />}
           {snapshot.currentTrack ? <PlatformPlayer track={snapshot.currentTrack} /> : null}
-          <UpdateNotice state={updateState} />
-
           <div className="privacy-strip">
-            <CloudIcon aria-hidden="true" />
-            <span>实时分析电脑输出声音，不访问麦克风；更新检测只查询 GitHub Release 版本号。</span>
+            {snapshot.running ? <CircleStopIcon aria-hidden="true" /> : <CloudIcon aria-hidden="true" />}
+            <span>{snapshot.running ? "单击左上圆球停止持续监听；只分析电脑输出声音。" : "不访问麦克风，音频片段只保留在内存中。"}</span>
           </div>
         </div>
       ) : null}
+
+      <SettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        pinned={pinned}
+        onPinnedChange={(nextPinned) => void togglePinned(nextPinned)}
+        updateState={updater.state}
+        autoCheck={updater.autoCheck}
+        onAutoCheckChange={updater.setAutoCheck}
+        onCheckForUpdates={() => void updater.checkForUpdates()}
+        onInstallUpdate={() => void updater.installUpdate()}
+      />
     </section>
   )
 }

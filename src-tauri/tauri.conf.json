@@ -29,7 +29,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' customprotocol: asset:; img-src 'self' asset: https: data:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost https://*.shazam.com https://*.youtube.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com; media-src https: blob:"
+      "csp": "default-src 'self' customprotocol: asset:; img-src 'self' asset: https: data:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost https://api.github.com https://*.shazam.com https://*.youtube.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com; media-src https: blob:"
     }
   },
   "bundle": {
